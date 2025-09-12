@@ -1,96 +1,181 @@
-import React, { useState, useEffect } from "react";
-import { Plus, Book, Zap, Smile, BarChart2, ChevronRight, LogOut } from "lucide-react";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { Plus, Book, Zap, Smile, BarChart2, ChevronRight, LogOut, ArrowLeft, Bot, Lightbulb } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { db } from "../../firebase";
-import { collection, query, where, orderBy, limit, onSnapshot, addDoc, doc, getDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../../firebase"; // Adjust path if needed
+import { collection, query, where, orderBy, onSnapshot, addDoc, doc, getDoc, serverTimestamp } from "firebase/firestore";
+import NewEntryModal from "../NewEntryModel"; // Adjust path if needed
 
-import NewEntryModal from "../NewEntryModel";
+// --- Helper Mappings & Functions ---
+const emotionToValue = {
+    'joy': 5, 'love': 5, 'surprise': 4, 'neutral': 3,
+    'fear': 2, 'sadness': 1, 'anger': 1, 'disgust': 1,
+};
+const emotionToEmoji = {
+    'joy': '😊', 'love': '🥰', 'surprise': '😮', 'neutral': '🤔',
+    'fear': '😨', 'sadness': '😢', 'anger': '😠', 'disgust': '🤢',
+    'default': '📝'
+};
 
-const stats = [
-  { name: "Total Entries", value: "78", icon: Book, change: "+5 this week" },
-  { name: "Writing Streak", value: "12 Days", icon: Zap, change: "New record!" },
-];
-const moodData = [ { name: 'Mon', mood: 4 }, { name: 'Tue', mood: 3 }, { name: 'Wed', mood: 5 }, { name: 'Thu', mood: 2 }, { name: 'Fri', mood: 4 }, { name: 'Sat', mood: 3 }, { name: 'Sun', mood: 4 } ];
-
-const StatCard = ({ icon: Icon, name, value, change }) => (
-  <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col items-start">
-    <div className="flex items-center mb-4">
-      <span className="bg-indigo-600 p-2 rounded-lg mr-3">
-        <Icon className="h-6 w-6 text-white" />
-      </span>
-      <span className="text-lg font-semibold">{name}</span>
+const StatCard = ({ icon: Icon, name, value }) => (
+  <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col justify-between">
+    <div className="flex justify-between items-start mb-2">
+      <h3 className="text-sm font-medium text-gray-400">{name}</h3>
+      <Icon className="h-6 w-6 text-indigo-400" />
     </div>
-    <div className="text-3xl font-bold mb-2">{value}</div>
-    <div className="text-sm text-green-400">{change}</div>
-  </div>
-);
-const MoodChart = () => (
-  <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 h-full">
-    <h3 className="text-lg font-semibold mb-4">Mood Over Time</h3>
-    <ResponsiveContainer width="100%" height={220}>
-      <LineChart data={moodData}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-        <XAxis dataKey="name" stroke="#9CA3AF" />
-        <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} stroke="#9CA3AF" />
-        <Tooltip />
-        <Line type="monotone" dataKey="mood" stroke="#6366F1" strokeWidth={3} dot={{ r: 5 }} />
-      </LineChart>
-    </ResponsiveContainer>
+    <div>
+      <p className="text-3xl font-bold">{value}</p>
+    </div>
   </div>
 );
 
+// --- Insights Panel Component ---
+const InsightsPanel = ({ entries }) => {
+  const insights = useMemo(() => {
+    const analyzedEntries = entries.filter(e => e.analysis && e.analysis.keywords && e.analysis.emotion);
+    if (analyzedEntries.length < 3) {
+      return null; // Not enough data to generate meaningful insights
+    }
 
+    // 1. Find Top Themes (most common keywords)
+    const allKeywords = analyzedEntries.flatMap(e => e.analysis.keywords);
+    const keywordCounts = allKeywords.reduce((acc, keyword) => {
+      acc[keyword] = (acc[keyword] || 0) + 1;
+      return acc;
+    }, {});
+    const topKeywords = Object.entries(keywordCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([keyword]) => keyword);
+
+    // 2. Find Emotion-Topic Correlations
+    const emotionCorrelations = {};
+    const emotions = ['joy', 'sadness', 'anger', 'love', 'fear'];
+    
+    emotions.forEach(emotion => {
+      const keywordsForEmotion = analyzedEntries
+        .filter(e => e.analysis.emotion === emotion)
+        .flatMap(e => e.analysis.keywords);
+      
+      if (keywordsForEmotion.length > 2) {
+        const emotionKeywordCounts = keywordsForEmotion.reduce((acc, keyword) => {
+          acc[keyword] = (acc[keyword] || 0) + 1;
+          return acc;
+        }, {});
+        const topKeywordForEmotion = Object.keys(emotionKeywordCounts).reduce((a, b) => emotionKeywordCounts[a] > emotionKeywordCounts[b] ? a : b);
+        emotionCorrelations[emotion] = topKeywordForEmotion;
+      }
+    });
+
+    return { topKeywords, emotionCorrelations };
+  }, [entries]);
+
+  if (!insights) {
+    return (
+      <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 h-full flex flex-col items-center justify-center text-center">
+        <Lightbulb className="h-10 w-10 text-indigo-400 mb-4" />
+        <h3 className="text-lg font-semibold">Insights Unlocking...</h3>
+        <p className="text-gray-400 mt-2 text-sm">Write a few more entries, and we'll start revealing patterns and insights about your journey.</p>
+      </div>
+    );
+  }
+
+  const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  return (
+    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 h-full">
+      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2"><Lightbulb /> Your Personal Insights</h3>
+      <div className="space-y-5">
+        <div>
+          <h4 className="text-sm font-bold text-gray-400 mb-2">Top Themes in Your Journals</h4>
+          <div className="flex flex-wrap gap-2">
+            {insights.topKeywords.map(keyword => (
+              <span key={keyword} className="bg-indigo-600/50 text-indigo-200 text-xs font-medium px-2.5 py-1 rounded-full">{keyword}</span>
+            ))}
+          </div>
+        </div>
+        {Object.keys(insights.emotionCorrelations).length > 0 && (
+          <div>
+            <h4 className="text-sm font-bold text-gray-400 mb-2">Emotion & Topic Connections</h4>
+            <ul className="space-y-1.5 text-sm text-gray-300">
+              {Object.entries(insights.emotionCorrelations).map(([emotion, keyword]) => (
+                <li key={emotion}>
+                  When you feel <strong className="text-indigo-300">{capitalize(emotion)}</strong>, you often write about <strong className="text-indigo-300">"{keyword}"</strong>.
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- Main Dashboard Component ---
 export default function UserDashboard() {
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
+  // Component State
   const [userName, setUserName] = useState("");
-  const [entries, setEntries] = useState([]);
+  const [allEntries, setAllEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedEntry, setSelectedEntry] = useState(null);
 
+  // Fetch all user data and set up listeners
   useEffect(() => {
     if (!currentUser) return;
-
     const userDocRef = doc(db, "users", currentUser.uid);
     getDoc(userDocRef).then((docSnap) => {
-      if (docSnap.exists()) {
-        setUserName(docSnap.data().name);
-      }
+      if (docSnap.exists()) setUserName(docSnap.data().name);
     });
-
-    const entriesQuery = query(
-      collection(db, "journals"),
-      where("userId", "==", currentUser.uid),
-      orderBy("createdAt", "desc"),
-      limit(5)
-    );
-
+    const entriesQuery = query(collection(db, "journals"), where("userId", "==", currentUser.uid), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(entriesQuery, (querySnapshot) => {
-      const userEntries = [];
-      querySnapshot.forEach((doc) => {
-        userEntries.push({ id: doc.id, ...doc.data() });
-      });
-      setEntries(userEntries);
+      const userEntries = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setAllEntries(userEntries);
       setLoading(false);
     });
-
     return () => unsubscribe();
-
   }, [currentUser]);
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      navigate("/login");
-    } catch (error) {
-      console.error("Failed to log out", error);
+  // Derived State & Insights
+  const dashboardStats = useMemo(() => {
+    const validEntries = allEntries.filter(entry => entry.createdAt);
+    const totalEntries = validEntries.length;
+    if (totalEntries === 0) return { totalEntries: 0, writingStreak: 0, wordCount: 0, avgMood: "N/A" };
+    const wordCount = validEntries.reduce((sum, entry) => sum + (entry.content?.split(' ').length || 0), 0);
+    let streak = 0;
+    if (totalEntries > 0) {
+        const entryDates = [...new Set(validEntries.map(e => new Date(e.createdAt.toDate()).setHours(0, 0, 0, 0)))];
+        entryDates.sort((a, b) => b - a);
+        let today = new Date().setHours(0, 0, 0, 0);
+        let yesterday = today - 86400000;
+        if (entryDates[0] === today || entryDates[0] === yesterday) {
+            streak = 1;
+            for (let i = 0; i < entryDates.length - 1; i++) {
+                if (entryDates[i] - entryDates[i+1] === 86400000) streak++;
+                else break;
+            }
+        }
     }
-  };
+    const analyzedEntries = validEntries.slice(0, 30).filter(entry => entry.analysis?.emotion);
+    let avgMood = "N/A";
+    if (analyzedEntries.length > 0) {
+        const moodSum = analyzedEntries.reduce((sum, entry) => sum + (emotionToValue[entry.analysis.emotion.toLowerCase()] || 3), 0);
+        const avgMoodValue = Math.round(moodSum / analyzedEntries.length);
+        avgMood = { 5: 'Positive', 4: 'Good', 3: 'Neutral', 2: 'Negative', 1: 'Very Negative' }[avgMoodValue] || "N/A";
+    }
+    return { totalEntries, writingStreak: streak, wordCount, avgMood };
+  }, [allEntries]);
   
-  const handleSaveEntry = async (newEntry) => {
+  // Action Handlers
+  const handleLogout = useCallback(async () => {
+    try { await logout(); navigate("/login"); } 
+    catch (error) { console.error("Failed to log out", error); }
+  }, [logout, navigate]);
+  
+  const handleSaveEntry = useCallback(async (newEntry) => {
     if (!currentUser) return;
     await addDoc(collection(db, "journals"), {
       ...newEntry,
@@ -98,78 +183,100 @@ export default function UserDashboard() {
       createdAt: serverTimestamp(),
       analysisPerformed: false,
     });
-  };
+  }, [currentUser]);
 
   return (
     <>
-      <NewEntryModal 
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSave={handleSaveEntry}
-      />
+      <NewEntryModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSaveEntry} />
       <div className="bg-gray-900 text-white min-h-screen p-4 sm:p-6 lg:p-8">
         <div className="max-w-7xl mx-auto">
           <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
             <div>
               <h1 className="text-3xl sm:text-4xl font-bold">Welcome back, {userName || '...'}!</h1>
-              <p className="mt-2 text-gray-400">Here's a snapshot of your journaling journey.</p>
+              <p className="mt-2 text-gray-400">Here's your personalized journaling dashboard.</p>
             </div>
             <div className="flex items-center gap-4 mt-4 sm:mt-0">
-              <button 
-                onClick={() => setIsModalOpen(true)}
-                className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-5 rounded-lg transition-transform transform hover:scale-105"
-              >
-                <Plus className="h-5 w-5" />
-                New Entry
+              <button onClick={() => setIsModalOpen(true)} className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-5 rounded-lg transition-transform transform hover:scale-105">
+                <Plus className="h-5 w-5" /> New Entry
               </button>
-              <button onClick={handleLogout} className="p-2 bg-gray-700 rounded-lg hover:bg-red-600 transition-colors">
-                <LogOut size={20} />
-              </button>
+              <button onClick={handleLogout} className="p-2 bg-gray-700 rounded-lg hover:bg-red-600 transition-colors"><LogOut size={20} /></button>
             </div>
           </header>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            {stats.map((stat, index) => (
-              <StatCard key={index} {...stat} />
-            ))}
+            <StatCard icon={Book} name="Total Entries" value={dashboardStats.totalEntries} />
+            <StatCard icon={Zap} name="Writing Streak" value={`${dashboardStats.writingStreak} Days`} />
+            <StatCard icon={BarChart2} name="Words Written" value={dashboardStats.wordCount.toLocaleString()} />
+            <StatCard icon={Smile} name="AI Assessed Mood" value={dashboardStats.avgMood} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 bg-gray-800 p-6 rounded-xl border border-gray-700">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Recent Entries</h3>
-                <a href="#" className="text-sm text-indigo-400 hover:underline">View All</a>
-              </div>
-              
-              {loading ? (
-                <p className="text-gray-400">Loading entries...</p>
-              ) : entries.length > 0 ? (
-                <ul className="space-y-4">
-                  {entries.map((entry) => (
-                    <li key={entry.id} className="p-4 bg-gray-700/50 rounded-lg flex items-center justify-between hover:bg-gray-700 transition-colors duration-200">
-                      <div className="flex items-center gap-4">
-                        <span className="text-2xl">{entry.mood}</span>
-                        <div>
-                          <p className="font-semibold">{entry.title}</p>
-                          <p className="text-sm text-gray-400">
-                            {entry.createdAt ? new Date(entry.createdAt.toDate()).toLocaleDateString() : 'Just now'}
-                          </p>
-                        </div>
-                      </div>
-                      <ChevronRight className="h-5 w-5 text-gray-500" />
-                    </li>
-                  ))}
-                </ul>
+              {selectedEntry ? (
+                <div>
+                  <button onClick={() => setSelectedEntry(null)} className="flex items-center gap-2 text-sm text-indigo-400 hover:underline mb-4">
+                    <ArrowLeft size={16} /> Back to Recent Entries
+                  </button>
+                  <div className="flex items-center gap-4 mb-2">
+                    <span className="text-4xl">
+                        {selectedEntry.analysis?.emotion ? (emotionToEmoji[selectedEntry.analysis.emotion.toLowerCase()] || emotionToEmoji.default) : emotionToEmoji.default}
+                    </span>
+                    <h2 className="text-2xl font-bold">{selectedEntry.title}</h2>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-6 ml-1">
+                    {selectedEntry.createdAt ? new Date(selectedEntry.createdAt.toDate()).toLocaleString() : 'Just now'}
+                  </p>
+                  <p className="whitespace-pre-wrap text-gray-300 leading-relaxed">{selectedEntry.content}</p>
+                  
+                  {selectedEntry.analysis && (
+                    <div className="mt-6 p-4 bg-gray-900/50 border border-indigo-500/30 rounded-lg">
+                      <h4 className="font-semibold text-indigo-300 flex items-center gap-2"><Bot size={18}/> AI Insights</h4>
+                      {selectedEntry.analysis.alert && (
+                          <div className="p-2 my-2 text-sm text-yellow-300 bg-yellow-900/30 rounded-md">
+                            It looks like you might be going through a tough time. Remember to be kind to yourself, and know that your therapist is there to support you.
+                          </div>
+                      )}
+                      <p className="text-sm mt-2"><strong className="text-gray-400">Detected Emotion:</strong> {selectedEntry.analysis.emotion}</p>
+                      <p className="text-sm mt-1"><strong className="text-gray-400">Quick Summary:</strong> {selectedEntry.analysis.summary}</p>
+                    </div>
+                  )}
+                </div>
               ) : (
-                <div className="text-center py-12">
-                   <h3 className="text-xl font-semibold">No entries yet!</h3>
-                   <p className="text-gray-400 mt-2">Click "New Entry" to start your first journal.</p>
+                <div>
+                  <h3 className="text-lg font-semibold mb-4">Recent Entries</h3>
+                  {loading ? <p className="text-gray-400">Loading entries...</p> : allEntries.length > 0 ? (
+                    <ul className="space-y-4">
+                      {allEntries.slice(0, 5).map((entry) => (
+                        <li key={entry.id}>
+                          <button onClick={() => setSelectedEntry(entry)} className="w-full text-left p-4 bg-gray-700/50 rounded-lg flex items-center justify-between hover:bg-gray-700 transition-colors duration-200">
+                            <div className="flex items-center gap-4">
+                              <span className="text-2xl">
+                                {entry.analysis?.emotion ? (emotionToEmoji[entry.analysis.emotion.toLowerCase()] || emotionToEmoji.default) : emotionToEmoji.default}
+                              </span>
+                              <div>
+                                <p className="font-semibold">{entry.title}</p>
+                                <p className="text-sm text-gray-400">
+                                  {entry.createdAt ? new Date(entry.createdAt.toDate()).toLocaleDateString() : 'Saving...'}
+                                </p>
+                              </div>
+                            </div>
+                            <ChevronRight className="h-5 w-5 text-gray-500" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-center py-12">
+                      <h3 className="text-xl font-semibold">No entries yet!</h3>
+                      <p className="mt-2 text-gray-400">Click "New Entry" to start your first journal.</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
             
-\            <div className="lg:col-span-1">
-              <MoodChart />
+            <div className="lg:col-span-1">
+              <InsightsPanel entries={allEntries} />
             </div>
           </div>
         </div>

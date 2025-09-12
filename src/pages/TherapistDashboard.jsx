@@ -5,26 +5,37 @@ import { db } from '../../firebase'; // Adjust path if your firebase.js is elsew
 import { collection, query, where, getDocs, onSnapshot, orderBy, updateDoc, doc } from 'firebase/firestore';
 import { LogOut, User, BookOpen, BrainCircuit, Loader2, AlertTriangle, CheckCircle, ShieldCheck, XCircle } from 'lucide-react';
 
-// --- Reusable Journal Entry Card Component ---
+// --- Helper Mappings ---
+const emotionToEmoji = {
+    'joy': '😊', 'love': '🥰', 'surprise': '😮', 'neutral': '🤔',
+    'fear': '😨', 'sadness': '😢', 'anger': '😠', 'disgust': '🤢',
+    'default': '📝' // Fallback for unanalyzed or unknown emotions
+};
+
+// --- Reusable Journal Entry Card Component (Corrected) ---
 const JournalEntryCard = ({ entry, patientName, onAnalyze, onAcknowledge, onResolve, analyzingId }) => {
-  // Determine the three possible states of an alert for styling and logic
   const isAlertUnacknowledged = entry.analysis?.alert && !entry.alertAcknowledged;
   const isAlertAcknowledged = entry.analysis?.alert && entry.alertAcknowledged && !entry.alertResolved;
   const isAlertResolved = entry.analysis?.alert && entry.alertResolved;
 
-  // Determine card styling based on the alert state
   const cardStyle = isAlertUnacknowledged ? 'bg-red-900/50 border border-red-500'
     : isAlertAcknowledged ? 'bg-yellow-900/50 border border-yellow-500'
-      : 'bg-gray-700/50';
+    : 'bg-gray-700/50';
 
   return (
     <div className={`p-4 rounded-lg transition-all ${cardStyle}`}>
       <div className="flex justify-between items-start">
         <div>
-          <p className="text-lg font-semibold">{entry.mood} {entry.title}</p>
-          <p className="text-xs text-gray-400">
+          <p className="text-lg font-semibold flex items-center gap-2">
+            {/* CORRECTED: Use AI-generated emoji with a fallback */}
+            <span className="text-2xl">
+              {entry.analysis?.emotion ? (emotionToEmoji[entry.analysis.emotion.toLowerCase()] || emotionToEmoji.default) : emotionToEmoji.default}
+            </span>
+            {entry.title}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
             {patientName && <span className="font-bold">{patientName}</span>}
-            {' on '}{new Date(entry.createdAt?.toDate()).toLocaleString()}
+            {' on '}{entry.createdAt ? new Date(entry.createdAt.toDate()).toLocaleString() : 'Saving...'}
           </p>
         </div>
         <button
@@ -39,14 +50,16 @@ const JournalEntryCard = ({ entry, patientName, onAnalyze, onAcknowledge, onReso
       <p className="mt-4 text-gray-300 whitespace-pre-wrap">{entry.content}</p>
 
       {entry.analysis && (
-        <div className={`mt-4 p-3 rounded-lg border ${isAlertUnacknowledged ? 'bg-red-800/40 border-red-500/50' :
+        <div className={`mt-4 p-3 rounded-lg border ${
+            isAlertUnacknowledged ? 'bg-red-800/40 border-red-500/50' :
             isAlertAcknowledged ? 'bg-yellow-800/40 border-yellow-500/50' :
-              'bg-gray-800 border-indigo-500/30'
-          }`}>
-          <h4 className={`font-semibold mb-2 ${isAlertUnacknowledged ? 'text-red-300' :
-              isAlertAcknowledged ? 'text-yellow-300' :
-                'text-indigo-300'
-            }`}>AI Insights</h4>
+            'bg-gray-800 border-indigo-500/30'
+        }`}>
+          <h4 className={`font-semibold mb-2 ${
+            isAlertUnacknowledged ? 'text-red-300' :
+            isAlertAcknowledged ? 'text-yellow-300' :
+            'text-indigo-300'
+          }`}>AI Insights</h4>
 
           {isAlertUnacknowledged && (
             <div className="p-2 bg-red-900/50 rounded-md mb-2">
@@ -77,7 +90,6 @@ const JournalEntryCard = ({ entry, patientName, onAnalyze, onAcknowledge, onReso
   );
 };
 
-
 // --- Main Therapist Dashboard Component ---
 export default function TherapistDashboard() {
   const { userProfile, logout, currentUser } = useAuth();
@@ -94,21 +106,56 @@ export default function TherapistDashboard() {
 
   const API_ENDPOINT = "http://localhost:8000/analyze";
 
-  // Effect 1: Fetch assigned patients on mount
+  const performAnalysis = useCallback(async (entryId, text, isBackground = false) => {
+    if (!isBackground) setAnalyzingId(entryId);
+    try {
+      const response = await fetch(API_ENDPOINT, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      });
+      if (!response.ok) throw new Error("Analysis request failed");
+      const result = await response.json();
+      const updateData = { analysis: result, analysisPerformed: true };
+      if (result.alert) {
+        updateData.alertAcknowledged = false;
+        updateData.alertResolved = false;
+      }
+      await updateDoc(doc(db, "journals", entryId), updateData);
+    } catch (error) {
+      console.error("Failed to analyze entry:", error);
+      if (!isBackground) alert("Could not analyze the entry.");
+    } finally {
+      if (!isBackground) setAnalyzingId(null);
+    }
+  }, []);
+
+  // Effect 1: Fetch patients AND analyze any unanalyzed backlog on initial load
   useEffect(() => {
     if (!currentUser) return;
-    const fetchPatients = async () => {
+    const initializeDashboard = async () => {
       setLoadingPatients(true);
       try {
         const patientsQuery = query(collection(db, "users"), where("assignedTherapist", "==", currentUser.uid));
-        const querySnapshot = await getDocs(patientsQuery);
-        const patientsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const patientSnapshot = await getDocs(patientsQuery);
+        const patientsList = patientSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setPatients(patientsList);
-      } catch (err) { console.error("Error fetching patients:", err); }
+
+        if (patientsList.length > 0) {
+          const patientIds = patientsList.map(p => p.id);
+          const backlogQuery = query(collection(db, "journals"), where("userId", "in", patientIds), where("analysisPerformed", "==", false));
+          const backlogSnapshot = await getDocs(backlogQuery);
+          
+          const analysisPromises = backlogSnapshot.docs.map(entryDoc => {
+            const entry = { id: entryDoc.id, ...entryDoc.data() };
+            return performAnalysis(entry.id, entry.content, true);
+          });
+          
+          await Promise.all(analysisPromises);
+        }
+      } catch (err) { console.error("Error initializing dashboard:", err); }
       finally { setLoadingPatients(false); }
     };
-    fetchPatients();
-  }, [currentUser]);
+    initializeDashboard();
+  }, [currentUser, performAnalysis]);
 
   // Effect 2: Fetch a selected patient's journal entries
   useEffect(() => {
@@ -126,12 +173,12 @@ export default function TherapistDashboard() {
     return () => unsubscribe();
   }, [selectedPatient]);
 
-  // Effect 3: Listen for new, unanalyzed entries for background processing
+  // Effect 3: Listen for NEW (real-time) unanalyzed entries
   useEffect(() => {
     if (!patients.length) return;
     const patientIds = patients.map(p => p.id);
-    const unanalyzedQuery = query(collection(db, "journals"), where("userId", "in", patientIds), where("analysisPerformed", "==", false));
-    const unsubscribe = onSnapshot(unanalyzedQuery, (snapshot) => {
+    const unanalyzedListenerQuery = query(collection(db, "journals"), where("userId", "in", patientIds), where("analysisPerformed", "==", false));
+    const unsubscribe = onSnapshot(unanalyzedListenerQuery, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const newEntry = { id: change.doc.id, ...change.doc.data() };
@@ -140,9 +187,9 @@ export default function TherapistDashboard() {
       });
     });
     return () => unsubscribe();
-  }, [patients]);
+  }, [patients, performAnalysis]);
 
-  // Effect 4: Listen for all unresolved alerts to populate the main alerts list
+  // Effect 4: Listen for all unresolved alerts
   useEffect(() => {
     if (!patients.length) return;
     const patientIds = patients.map(p => p.id);
@@ -158,38 +205,9 @@ export default function TherapistDashboard() {
     return () => unsubscribe();
   }, [patients]);
 
-  // --- Action Handlers ---
-  const performAnalysis = useCallback(async (entryId, text, isBackground = false) => {
-    if (!isBackground) setAnalyzingId(entryId);
-    try {
-      const response = await fetch(API_ENDPOINT, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
-      });
-      if (!response.ok) throw new Error("Analysis request failed");
-      const result = await response.json();
-      const updateData = { analysis: result, analysisPerformed: true };
-      if (result.alert) {
-        updateData.alertAcknowledged = false;
-        updateData.alertResolved = false;
-      }
-      const entryRef = doc(db, "journals", entryId);
-      await updateDoc(entryRef, updateData);
-    } catch (error) {
-      console.error("Failed to analyze entry:", error);
-      if (!isBackground) alert("Could not analyze the entry.");
-    } finally {
-      if (!isBackground) setAnalyzingId(null);
-    }
-  }, []);
-
-  const handleAcknowledgeAlert = async (entryId) => {
-    await updateDoc(doc(db, "journals", entryId), { alertAcknowledged: true });
-  };
-
-  const handleResolveAlert = async (entryId) => {
-    await updateDoc(doc(db, "journals", entryId), { alertResolved: true });
-  };
-
+  // Action Handlers
+  const handleAcknowledgeAlert = async (entryId) => await updateDoc(doc(db, "journals", entryId), { alertAcknowledged: true });
+  const handleResolveAlert = async (entryId) => await updateDoc(doc(db, "journals", entryId), { alertResolved: true });
   const handleLogout = async () => {
     try { await logout(); navigate("/login"); }
     catch (error) { console.error("Failed to log out", error); }
@@ -200,9 +218,7 @@ export default function TherapistDashboard() {
       <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
         <header className="flex justify-between items-center mb-8">
           <div>
-            <a href="/dashboard/therapist">
-              <h1 className="text-3xl font-bold">Therapist Dashboard</h1>
-            </a>
+            <h1 className="text-3xl font-bold">Therapist Dashboard</h1>
             <p className="mt-2 text-gray-400">Welcome, {userProfile?.name || 'Therapist'}.</p>
           </div>
           <button onClick={handleLogout} className="flex items-center gap-2 bg-gray-700 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
@@ -211,7 +227,6 @@ export default function TherapistDashboard() {
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          {/* --- Patient List (Left Column) --- */}
           <div className="md:col-span-1 bg-gray-800 p-4 rounded-xl border border-gray-700 self-start">
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2"><User /> Your Patients</h2>
             {loadingPatients ? <p className="text-gray-400">Loading...</p> : (
@@ -231,10 +246,8 @@ export default function TherapistDashboard() {
             )}
           </div>
 
-          {/* --- Main Content Panel (Right Column) --- */}
           <div className="md:col-span-3">
             {selectedPatient ? (
-              // --- View for a SELECTED PATIENT ---
               <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-2xl font-bold flex items-center gap-3"><BookOpen /> Journal for {selectedPatient.name}</h2>
@@ -258,12 +271,16 @@ export default function TherapistDashboard() {
                 ) : <p className="text-gray-500 text-center py-10">This patient has not written any journal entries yet.</p>}
               </div>
             ) : (
-              // --- DEFAULT View for GLOBAL ALERTS ---
               <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
                 <h2 className="text-2xl font-bold mb-6 flex items-center gap-3"><AlertTriangle className="text-yellow-400" /> All Active Alerts</h2>
                 {alerts.length > 0 ? (
                   <div className="space-y-6">
-                    {alerts.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis()).map(alertEntry => (
+                    {alerts.sort((a, b) => {
+                      if (a.alertAcknowledged !== b.alertAcknowledged) {
+                        return a.alertAcknowledged ? 1 : -1;
+                      }
+                      return b.createdAt.toMillis() - a.createdAt.toMillis();
+                    }).map(alertEntry => (
                       <JournalEntryCard
                         key={alertEntry.id}
                         entry={alertEntry}
