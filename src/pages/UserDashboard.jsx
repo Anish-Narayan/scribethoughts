@@ -96,6 +96,7 @@ export default function UserDashboard() {
       ...newEntry,
       userId: currentUser.uid,
       createdAt: serverTimestamp(),
+      analysisPerformed: false,
     });
   };
 

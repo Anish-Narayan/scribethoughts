@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 
-const moods = ['😊', '😌', '🤔', '😢', '😠'];
 
 export default function NewEntryModal({ isOpen, onClose, onSave }) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [mood, setMood] = useState('😊');
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = async () => {
@@ -19,7 +17,6 @@ export default function NewEntryModal({ isOpen, onClose, onSave }) {
       await onSave({ title, content, mood });
       setTitle('');
       setContent('');
-      setMood('😊');
       onClose();
     } catch (error) {
       console.error("Failed to save entry:", error);
@@ -54,21 +51,6 @@ export default function NewEntryModal({ isOpen, onClose, onSave }) {
             rows="8"
             className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
           ></textarea>
-          
-          <div className="flex items-center gap-4">
-            <p className="text-gray-400">How are you feeling?</p>
-            <div className="flex gap-2">
-              {moods.map(m => (
-                <button
-                  key={m}
-                  onClick={() => setMood(m)}
-                  className={`text-2xl p-2 rounded-full transition-transform transform hover:scale-125 ${mood === m ? 'bg-indigo-600' : 'bg-gray-700'}`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         <div className="mt-6 flex justify-end gap-4">
