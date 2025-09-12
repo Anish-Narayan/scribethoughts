@@ -12,7 +12,7 @@ const stats = [
   { name: "Total Entries", value: "78", icon: Book, change: "+5 this week" },
   { name: "Writing Streak", value: "12 Days", icon: Zap, change: "New record!" },
 ];
-const moodData = [ { name: 'Mon', mood: 4 }, { name: 'Tue', mood: 3 }, ];
+const moodData = [ { name: 'Mon', mood: 4 }, { name: 'Tue', mood: 3 }, { name: 'Wed', mood: 5 }, { name: 'Thu', mood: 2 }, { name: 'Fri', mood: 4 }, { name: 'Sat', mood: 3 }, { name: 'Sun', mood: 4 } ];
 
 const StatCard = ({ icon: Icon, name, value, change }) => (
   <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col items-start">
