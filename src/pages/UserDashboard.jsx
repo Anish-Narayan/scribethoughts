@@ -13,7 +13,7 @@ const emotionToValue = {
     'fear': 2, 'sadness': 1, 'anger': 1, 'disgust': 1,
 };
 const emotionToEmoji = {
-    'joy': '😊', 'love': '🥰', 'surprise': '😮', 'neutral': '🤔',
+    'joy': '😊', 'surprise': '😮', 'neutral': '🤔',
     'fear': '😨', 'sadness': '😢', 'anger': '😠', 'disgust': '🤢',
     'default': '📝'
 };
