@@ -25,10 +25,11 @@ export default function Login() {
   const { currentUser } = useAuth();
 
   useEffect(() => {
-    if (currentUser) {
-      navigate("/dashboard"); // Redirect to the correct dashboard
+    if (!loading && currentUser && window.location.pathname !== "/dashboard") {
+      navigate("/dashboard");
     }
-  }, [currentUser, navigate]);
+  }, [currentUser, loading, navigate]);
+
 
   // NEW: Effect to fetch therapists from Firestore
   useEffect(() => {
@@ -62,7 +63,7 @@ export default function Login() {
         setLoading(false);
         return;
       }
-      
+
       // NEW: Determine role based on email
       const isTherapist = email.toLowerCase().endsWith('@t.com');
       const role = isTherapist ? 'therapist' : 'user';
@@ -130,42 +131,40 @@ export default function Login() {
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
       <div className="w-full max-w-4xl grid md:grid-cols-2 shadow-2xl rounded-xl overflow-hidden">
         <div className="bg-gray-800 p-8 md:p-12 flex-col justify-center items-center text-center hidden md:flex">
-            <BrainCircuit className="w-24 h-24 text-indigo-400 mb-6" />
-            <h1 className="text-3xl font-bold mb-3">MindScribe AI</h1>
-            <p className="text-gray-300">Your personal space for journaling, reflection, and AI-powered insights.</p>
+          <BrainCircuit className="w-24 h-24 text-indigo-400 mb-6" />
+          <h1 className="text-3xl font-bold mb-3">MindScribe AI</h1>
+          <p className="text-gray-300">Your personal space for journaling, reflection, and AI-powered insights.</p>
         </div>
         <div className="bg-gray-800/50 p-8 md:p-12">
           {/* ... Tabs and titles ... */}
           <div className="flex mb-6 border-b border-gray-700">
             <button
               onClick={() => { setActiveTab("login"); setError(""); }}
-              className={`w-1/2 py-3 text-sm font-semibold transition-colors ${
-                activeTab === "login"
+              className={`w-1/2 py-3 text-sm font-semibold transition-colors ${activeTab === "login"
                   ? "text-indigo-400 border-b-2 border-indigo-400"
                   : "text-gray-400 hover:text-white"
-              }`}
+                }`}
             >
               LOGIN
             </button>
             <button
               onClick={() => { setActiveTab("signup"); setError(""); }}
-              className={`w-1/2 py-3 text-sm font-semibold transition-colors ${
-                activeTab === "signup"
+              className={`w-1/2 py-3 text-sm font-semibold transition-colors ${activeTab === "signup"
                   ? "text-indigo-400 border-b-2 border-indigo-400"
                   : "text-gray-400 hover:text-white"
-              }`}
+                }`}
             >
               SIGN UP
             </button>
           </div>
-          
+
           <h2 className="text-2xl font-semibold mb-2 text-center">
             {activeTab === 'login' ? 'Welcome Back' : 'Create an Account'}
           </h2>
           <p className="text-gray-400 mb-6 text-center text-sm">
-             {activeTab === 'login' ? 'Sign in to continue your journey.' : 'Get started in just a few clicks.'}
+            {activeTab === 'login' ? 'Sign in to continue your journey.' : 'Get started in just a few clicks.'}
           </p>
-          
+
           <form onSubmit={handleFormSubmit}>
             {activeTab === "signup" && (
               <div className="relative mb-4">
